@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>MONSTER HDR - NO ZOOM</title>
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family:'Segoe UI', sans-serif; background:#000; color:#fff; overflow:hidden; height:100vh; }
+        #container { position:relative; width:100vw; height:100vh; display: flex; align-items: center; justify-content: center; }
+        
+        /* জুম বন্ধ করার জন্য object-fit: contain ব্যবহার করা হয়েছে */
+        video { width:100%; height:100%; object-fit: contain; background: #000; }
+
+        #timer-display { 
+            display:none; position:absolute; top:50%; left:50%; 
+            transform:translate(-50%, -50%); font-size:120px; 
+            font-weight:900; color:#00ff88; text-shadow:0 0 30px rgba(0,255,136,0.8); z-index:20; 
+        }
+
+        .ui { position:absolute; bottom:50px; left:0; width:100%; text-align:center; z-index:10; }
+        .shutter { 
+            width:85px; height:85px; border-radius:50%; background:#fff; 
+            border:6px solid #00ff88; cursor:pointer; display:inline-block;
+            transition: 0.3s;
+        }
+        .shutter:active { transform: scale(0.9); }
+
+        #loader { 
+            display:none; position:fixed; inset:0; background:rgba(0,0,0,0.95); 
+            z-index:100; flex-direction:column; align-items:center; justify-content:center; 
+        }
+        .spinner { 
+            width:60px; height:60px; border:5px solid #111; 
+            border-top-color:#00ff88; border-radius:50%; animation:rot 1s linear infinite; 
+        }
+        @keyframes rot { to { transform:rotate(360deg); } }
+        #status { margin-top:25px; color:#00ff88; font-weight:bold; letter-spacing:1px; text-align:center; }
+    </style>
+</head>
+<body>
+
+<div id="container">
+    <video id="v" autoplay playsinline></video>
+    <div id="timer-display">5</div>
+    
+    <div class="ui">
+        <div class="shutter" id="snap"></div>
+        <p style="margin-top:10px; color:#00ff88; font-size:12px; font-weight:bold;">MONSTER HDR (NO ZOOM)</p>
+    </div>
+</div>
+
+<div id="loader">
+    <div class="spinner"></div>
+    <div id="status">সিস্টেম প্রসেস হচ্ছে...<br>স্থির হয়ে দাঁড়ান</div>
+</div>
+
+<canvas id="c" style="display:none;"></canvas>
+
+<script>
+const v = document.getElementById('v');
+const c = document.getElementById('c');
+const ctx = c.getContext('2d', {alpha: false});
+const snap = document.getElementById('snap');
+const loader = document.getElementById('loader');
+const statusText = document.getElementById('status');
+const timerDisplay = document.getElementById('timer-display');
+
+async function init() {
+    try {
+        // ideal রেজোলিউশন ব্যবহার করা হয়েছে যাতে ক্যামেরা জুম না হয়ে ফুল ভিউ দেয়
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: { 
+                facingMode: "environment",
+                width: { ideal: 4096 },
+                height: { ideal: 2160 }
+            }
+        });
+        v.srcObject = stream;
+    } catch(e) { alert("ক্যামেরা পারমিশন দিন!"); }
+}
+
+function startTimer() {
+    let timeLeft = 5;
+    timerDisplay.style.display = 'block';
+    timerDisplay.innerText = timeLeft;
+    snap.style.pointerEvents = 'none'; 
+    snap.style.opacity = '0.5';
+
+    const timer = setInterval(() => {
+        timeLeft--;
+        if (timeLeft > 0) {
+            timerDisplay.innerText = timeLeft;
+        } else {
+            clearInterval(timer);
+            timerDisplay.style.display = 'none';
+            processMonsterHDR(); 
+        }
+    }, 1000);
+}
+
+async function processMonsterHDR() {
+    loader.style.display = 'flex';
+    
+    // ভিডিওর অরিজিনাল রেজোলিউশন অনুযায়ী ক্যানভাস সেট করা
+    const w = v.videoWidth;
+    const h = v.videoHeight;
+    c.width = w;
+    c.height = h;
+
+    const framesToCapture = 40; 
+    const stack = [];
+
+    for (let i = 0; i < framesToCapture; i++) {
+        statusText.innerText = `ক্যাপচারিং ফ্রেম: ${i+1}/${framesToCapture}\nনড়াচড়া করবেন না!`;
+        ctx.drawImage(v, 0, 0, w, h);
+        stack.push(ctx.getImageData(0, 0, w, h).data);
+        await new Promise(r => requestAnimationFrame(r));
+    }
+
+    statusText.innerText = "ম্যাজিক্যাল প্রসেসিং চলছে...";
+    const finalImg = ctx.createImageData(w, h);
+    
+    for (let j = 0; j < finalImg.data.length; j += 4) {
+        let r = 0, g = 0, b = 0;
+        for (let k = 0; k < framesToCapture; k++) {
+            r += stack[k][j];
+            g += stack[k][j+1];
+            b += stack[k][j+2];
+        }
+        finalImg.data[j] = r / framesToCapture;
+        finalImg.data[j+1] = g / framesToCapture;
+        finalImg.data[j+2] = b / framesToCapture;
+        finalImg.data[j+3] = 255;
+    }
+
+    ctx.putImageData(finalImg, 0, 0);
+    
+    const link = document.createElement('a');
+    link.href = c.toDataURL('image/jpeg', 0.98);
+    link.download = `MONSTER_HDR_1X_${Date.now()}.jpg`;
+    link.click();
+
+    statusText.innerText = "সফলভাবে সেভ হয়েছে!";
+    setTimeout(() => { 
+        loader.style.display = 'none'; 
+        snap.style.pointerEvents = 'all';
+        snap.style.opacity = '1';
+    }, 1500);
+}
+
+snap.onclick = startTimer;
+init();
+</script>
+
+</body>
+</html>
